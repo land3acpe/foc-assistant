@@ -1,0 +1,44 @@
+# Secrets and local login state
+.env
+.wechat_token.json
+.wechat_qr.png
+user_profile.json
+
+# Runtime logs and temporary output
+*.log
+*.err.log
+*.out.log
+agent_runs.log
+reflection_log.jsonl
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Generated indexes and bulky local caches
+knowledge_index.json
+
+# IDE / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Build output
+Debug/
+Release/
+Flash/
+RAM/
+dist/
+build/
+
+# Large binary / data files (user-specific)
+knowledge_base/papers/
+knowledge_base/data/
+knowledge_base/memory/
+knowledge_base/codes/
+knowledge_base/notes/

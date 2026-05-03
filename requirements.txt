@@ -1,0 +1,9 @@
+openai>=1.30.0
+python-dotenv>=1.0.0
+chardet>=5.0.0
+aiohttp>=3.9.0
+qq-botpy>=1.1.6
+ddgs>=5.0
+beautifulsoup4>=4.12
+requests>=2.31
+langgraph>=1.1.10
