@@ -27,6 +27,7 @@ from botpy.message import Message
 from agent import AgentCallbacks, agent_loop
 from config import (
     BASE_URL,
+    DESKTOP,
     MAX_ITERATIONS,
     MODEL,
     QQ_APP_ID,
@@ -688,7 +689,7 @@ class FOCQQBot(botpy.Client):
         compact = re.sub(r"\s+", "", content.lower())
         paths = []
         if "focexamplecode" in compact:
-            paths.append(r"C:\Users\macree\Desktop\focexamplecode")
+            paths.append(str(DESKTOP / "focexamplecode"))
 
         # 捕获显式 Windows 路径，避免只支持 focexamplecode。
         for m in re.finditer(r"[A-Za-z]:\\[^\s，。；;]+", content):

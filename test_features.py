@@ -271,13 +271,26 @@ def test_tool_registration():
 
 
 def test_project_path():
-    """测试项目路径是否更新"""
+    """测试项目路径配置（环境变量可配置，非硬编码）"""
+    import os
     from config import PROJECT_ROOT
 
-    if "12.21_nftsmc_fteso_sec" not in str(PROJECT_ROOT):
-        return False, f"项目路径未更新: {PROJECT_ROOT}"
+    env_path = os.environ.get("FOC_PROJECT_ROOT", "")
 
-    return True, f"项目路径: {PROJECT_ROOT}"
+    if env_path:
+        # 环境变量已设置，检查是否生效
+        expected = str(Path(env_path))
+        actual = str(PROJECT_ROOT)
+        if actual == expected:
+            return True, f"项目路径从环境变量读取: {PROJECT_ROOT}"
+        else:
+            return False, f"环境变量未生效: env={env_path}, actual={PROJECT_ROOT}"
+    else:
+        # 环境变量未设置，检查是否使用默认值
+        if "my_foc_project" in str(PROJECT_ROOT):
+            return True, f"项目路径使用默认值: {PROJECT_ROOT} (用户需在 .env 中设置 FOC_PROJECT_ROOT)"
+        else:
+            return False, f"项目路径异常: {PROJECT_ROOT}"
 
 
 # ============================================================

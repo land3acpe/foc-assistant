@@ -216,9 +216,12 @@ MODEL = _ACTIVE_CFG["model_id"]
 V4_PARAMS = dict(_ACTIVE_CFG["default_params"])
 THINKING_MODE = _ACTIVE_CFG["thinking_mode"]
 
-# --- 项目路径 ---
-PROJECT_ROOT = Path(r"C:\Users\macree\Desktop\12.21_nftsmc_fteso_sec-")
-DESKTOP = Path(r"C:\Users\macree\Desktop")
+# --- 项目路径（通过环境变量配置，不硬编码） ---
+# 在 .env 中设置 FOC_PROJECT_ROOT 指向你的 FOC 工程目录
+# 在 .env 中设置 FOC_DESKTOP 指向桌面路径（论文搜索用）
+_default_desktop = Path.home() / "Desktop"
+PROJECT_ROOT = Path(os.environ.get("FOC_PROJECT_ROOT", str(_default_desktop / "my_foc_project")))
+DESKTOP = Path(os.environ.get("FOC_DESKTOP", str(_default_desktop)))
 
 # --- Agent 参数 ---
 MAX_ITERATIONS = 25       # 最大工具调用轮次
@@ -402,9 +405,10 @@ SYSTEM_PROMPT = """你叫 FOC-Assistant，是一个专门辅助永磁同步电�
 - 嵌入式 C 代码（包括 IQMath 定点运算）
 
 ## 你的工作环境
-- 项目根目录: C:\\Users\\macree\\Desktop\\12.21_nftsmc_fteso_sec-
-- 这是双三相 PMSM 的 FOC + ESO 观测器项目
-- 桌面有大量相关论文（PDF）、Simulink 模型（.slx）、波形数据（.csv）
+- 项目根目录: {project_root}
+- 桌面路径: {desktop}
+- 用户的 FOC 工程目录包含 C/H 源码、Simulink 模型、波形数据等
+- 桌面可能有相关论文（PDF）、Simulink 模型（.slx）、波形数据（.csv）
 
 ## 知识库优先
 - 你拥有本地知识库，包含项目文档、论文摘要、技术笔记
@@ -432,4 +436,4 @@ SYSTEM_PROMPT = """你叫 FOC-Assistant，是一个专门辅助永磁同步电�
 - 示例：用户问"SVPWM谐波注入法"→ 回答谐波注入法的实现，不要跳到"电流谐波抑制"
 - 当用户说"写出示例代码"时，写出**可编译运行的完整代码**，不要只写伪代码或框架
 - 写代码时：包含必要的 #include、函数实现、初始化配置，避免只写注释占位符
-"""
+""".format(project_root=PROJECT_ROOT, desktop=DESKTOP)

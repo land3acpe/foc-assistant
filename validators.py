@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from config import PROJECT_ROOT
+from config import PROJECT_ROOT, DESKTOP
 
 
 @dataclass
@@ -21,10 +21,10 @@ def requested_output_paths(task: str) -> list[Path]:
     compact = re.sub(r"\s+", "", task.lower())
 
     if any(name in compact for name in ("focexamplecode", "focexamplcode", "focexamplecodes", "focexamplcodes")):
-        paths.append(Path(r"C:\Users\macree\Desktop\focexamplecode"))
+        paths.append(DESKTOP / "focexamplecode")
 
     if "foc_example_codes" in compact or "focexamplecodes" in compact:
-        paths.append(Path(r"C:\Users\macree\Desktop\FOC_Example_Codes"))
+        paths.append(DESKTOP / "FOC_Example_Codes")
 
     for match in re.finditer(r"[A-Za-z]:\\[^\s，。；;]+", task):
         paths.append(Path(match.group(0).rstrip("。,.，")))
