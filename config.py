@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Optional
 
 try:
     from dotenv import load_dotenv
@@ -9,24 +10,214 @@ try:
 except Exception:
     pass
 
-# --- API 配置 ---
-API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-BASE_URL = "https://api.deepseek.com/v1"
-MODEL = "deepseek-v4-pro"  # DeepSeek-V4 Pro (49B active params, 1M context)
+# ============================================================
+# 多模型注册表 —— 所有可用模型的配置
+# ============================================================
 
-# DeepSeek V4 推荐参数
-V4_PARAMS = {
-    "temperature": 1.0,       # 官方推荐 1.0
-    "top_p": 1.0,             # 官方推荐 1.0
-    "max_tokens": 8192,       # 单次输出上限（最大 131072）
+MODEL_REGISTRY = {
+    # --- DeepSeek 系列 ---
+    "deepseek-v4-pro": {
+        "display_name": "DeepSeek V4 Pro",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "model_id": "deepseek-v4-pro",
+        "default_params": {"temperature": 1.0, "top_p": 1.0, "max_tokens": 8192},
+        "thinking_mode": "thinking",
+        "supports_tools": True,
+        "supports_thinking": True,
+        "description": "DeepSeek V4 Pro, 49B active, 1M context, 强推理",
+        "tags": ["cloud", "reasoning", "tools"],
+    },
+    "deepseek-v4-flash": {
+        "display_name": "DeepSeek V4 Flash",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "model_id": "deepseek-v4-flash",
+        "default_params": {"temperature": 1.0, "top_p": 1.0, "max_tokens": 4096},
+        "thinking_mode": "non-thinking",
+        "supports_tools": True,
+        "supports_thinking": False,
+        "description": "DeepSeek V4 Flash, 轻量快速, 适合简单任务",
+        "tags": ["cloud", "fast", "tools"],
+    },
+
+    # --- 小米 MiMo 系列 ---
+    "mimo-v2.5": {
+        "display_name": "MiMo V2.5",
+        "base_url": "http://127.0.0.1:9001/v1",
+        "api_key_env": "MIMO_API_KEY",
+        "model_id": "mimo-v2.5",
+        "default_params": {"temperature": 1.0, "top_p": 0.95, "max_tokens": 8192},
+        "thinking_mode": "thinking",
+        "supports_tools": True,
+        "supports_thinking": True,
+        "description": "小米 MiMo V2.5, 310B MoE (15B active), 1M context, 原生工具调用",
+        "tags": ["local", "reasoning", "tools", "mimo"],
+    },
+    "mimo-v2.5-pro": {
+        "display_name": "MiMo V2.5 Pro",
+        "base_url": "http://127.0.0.1:9001/v1",
+        "api_key_env": "MIMO_API_KEY",
+        "model_id": "mimo-v2.5-pro",
+        "default_params": {"temperature": 1.0, "top_p": 0.95, "max_tokens": 8192},
+        "thinking_mode": "thinking",
+        "supports_tools": True,
+        "supports_thinking": True,
+        "description": "小米 MiMo V2.5 Pro, 1T MoE (42B active), 1M context, 最强 agent 能力",
+        "tags": ["local", "reasoning", "tools", "mimo"],
+    },
+    "mimo-api": {
+        "display_name": "MiMo API (小米云)",
+        "base_url": "https://api.platform.xiaomimimo.com/v1",
+        "api_key_env": "MIMO_API_KEY",
+        "model_id": "mimo-v2.5",
+        "default_params": {"temperature": 1.0, "top_p": 0.95, "max_tokens": 8192},
+        "thinking_mode": "thinking",
+        "supports_tools": True,
+        "supports_thinking": True,
+        "description": "小米 MiMo 官方 API, 无需本地部署",
+        "tags": ["cloud", "reasoning", "tools", "mimo"],
+    },
+
+    # --- 本地 Ollama 模型（通用） ---
+    "ollama-local": {
+        "display_name": "Ollama 本地模型",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "api_key_env": "",
+        "api_key_default": "ollama",
+        "model_id": "llama3.1:8b",
+        "default_params": {"temperature": 0.7, "top_p": 0.9, "max_tokens": 4096},
+        "thinking_mode": "non-thinking",
+        "supports_tools": False,
+        "supports_thinking": False,
+        "description": "Ollama 本地模型, 适合简单对话和实验",
+        "tags": ["local", "fast"],
+    },
+
+    # --- OpenAI ---
+    "gpt-4o": {
+        "display_name": "GPT-4o",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "model_id": "gpt-4o",
+        "default_params": {"temperature": 0.7, "top_p": 1.0, "max_tokens": 4096},
+        "thinking_mode": "non-thinking",
+        "supports_tools": True,
+        "supports_thinking": False,
+        "description": "OpenAI GPT-4o",
+        "tags": ["cloud", "tools"],
+    },
 }
 
-# thinking_mode: "non-thinking" | "thinking" | "thinking_max"
-# thinking_max 适合复杂 Agent 任务，但需要更大上下文预算
-THINKING_MODE = "thinking"
+# ============================================================
+# 混合模型策略 —— 不同任务类型使用不同模型
+# ============================================================
+
+HYBRID_STRATEGY = {
+    "enabled": True,
+    # 用于需要工具调用的任务（文件操作、代码分析、编译等）
+    "tool_model": "deepseek-v4-pro",
+    # 用于纯推理/思考任务（参数计算、方案设计、论文分析）
+    "reasoning_model": "mimo-v2.5",
+    # 用于简单聊天（问候、状态查询等）
+    "chat_model": "deepseek-v4-flash",
+    # 用于反思评估（轻量、快速）
+    "reflection_model": "deepseek-v4-flash",
+}
+
+
+# ============================================================
+# 模型切换管理器
+# ============================================================
+
+class ModelManager:
+    """管理当前使用的模型，支持动态切换和混合策略。"""
+
+    def __init__(self):
+        self._active_model = os.environ.get("FOC_ACTIVE_MODEL", "deepseek-v4-pro")
+        self._hybrid_enabled = HYBRID_STRATEGY["enabled"]
+
+    @property
+    def active_model_id(self) -> str:
+        return self._active_model
+
+    def get_model_config(self, model_id: Optional[str] = None) -> dict:
+        """获取模型配置。不传参数则返回当前活跃模型。"""
+        mid = model_id or self._active_model
+        if mid not in MODEL_REGISTRY:
+            print(f"  [MODEL] 未知模型 '{mid}'，回退到 deepseek-v4-pro")
+            mid = "deepseek-v4-pro"
+        return MODEL_REGISTRY[mid]
+
+    def switch_model(self, model_id: str) -> str:
+        """切换当前活跃模型。"""
+        if model_id not in MODEL_REGISTRY:
+            return f"未知模型: {model_id}\n可用: {', '.join(MODEL_REGISTRY.keys())}"
+        old = self._active_model
+        self._active_model = model_id
+        cfg = MODEL_REGISTRY[model_id]
+        return f"模型已切换: {old} → {model_id} ({cfg['display_name']})"
+
+    def get_model_for_task(self, task_type: str) -> str:
+        """混合策略：根据任务类型返回最合适的模型 ID。"""
+        if not self._hybrid_enabled:
+            return self._active_model
+        mapping = {
+            "tool": HYBRID_STRATEGY["tool_model"],
+            "reasoning": HYBRID_STRATEGY["reasoning_model"],
+            "chat": HYBRID_STRATEGY["chat_model"],
+            "reflection": HYBRID_STRATEGY["reflection_model"],
+        }
+        return mapping.get(task_type, self._active_model)
+
+    def list_models(self) -> str:
+        """列出所有可用模型。"""
+        lines = ["可用模型:"]
+        for mid, cfg in MODEL_REGISTRY.items():
+            marker = " ← 当前" if mid == self._active_model else ""
+            tags = ", ".join(cfg.get("tags", []))
+            tools = "✓ 工具" if cfg["supports_tools"] else "✗ 工具"
+            think = "✓ 思考" if cfg["supports_thinking"] else "✗ 思考"
+            lines.append(f"  [{mid}] {cfg['display_name']}")
+            lines.append(f"    {cfg['description']}")
+            lines.append(f"    {tools} | {think} | 标签: {tags}{marker}")
+        lines.append(f"\n混合策略: {'启用' if self._hybrid_enabled else '禁用'}")
+        if self._hybrid_enabled:
+            for k, v in HYBRID_STRATEGY.items():
+                if k != "enabled":
+                    lines.append(f"  {k}: {v}")
+        return "\n".join(lines)
+
+    def toggle_hybrid(self, enabled: bool) -> str:
+        self._hybrid_enabled = enabled
+        return f"混合策略已{'启用' if enabled else '禁用'}"
+
+
+# 全局单例
+_model_manager = ModelManager()
+
+def get_model_manager() -> ModelManager:
+    return _model_manager
+
+
+# ============================================================
+# 向后兼容 —— 保留旧的全局变量，但底层用 ModelManager
+# ============================================================
+
+def _get_active_config() -> dict:
+    return _model_manager.get_model_config()
+
+# 这些变量在模块加载时求值一次，用于旧代码兼容
+# 新代码应该直接用 get_model_manager()
+_ACTIVE_CFG = _get_active_config()
+API_KEY = os.environ.get(_ACTIVE_CFG.get("api_key_env", ""), "") or _ACTIVE_CFG.get("api_key_default", "")
+BASE_URL = _ACTIVE_CFG["base_url"]
+MODEL = _ACTIVE_CFG["model_id"]
+V4_PARAMS = dict(_ACTIVE_CFG["default_params"])
+THINKING_MODE = _ACTIVE_CFG["thinking_mode"]
 
 # --- 项目路径 ---
-PROJECT_ROOT = Path(r"C:\Users\macree\Desktop\11.24_M_DualThree_VSD_FOC_eso_modifly")
+PROJECT_ROOT = Path(r"C:\Users\macree\Desktop\12.21_nftsmc_fteso_sec-")
 DESKTOP = Path(r"C:\Users\macree\Desktop")
 
 # --- Agent 参数 ---
@@ -211,7 +402,7 @@ SYSTEM_PROMPT = """你叫 FOC-Assistant，是一个专门辅助永磁同步电�
 - 嵌入式 C 代码（包括 IQMath 定点运算）
 
 ## 你的工作环境
-- 项目根目录: C:\\Users\\macree\\Desktop\\11.24_M_DualThree_VSD_FOC_eso_modifly
+- 项目根目录: C:\\Users\\macree\\Desktop\\12.21_nftsmc_fteso_sec-
 - 这是双三相 PMSM 的 FOC + ESO 观测器项目
 - 桌面有大量相关论文（PDF）、Simulink 模型（.slx）、波形数据（.csv）
 

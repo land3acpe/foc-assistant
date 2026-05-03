@@ -8,9 +8,11 @@ from typing import Callable, Optional
 
 from openai import OpenAI
 
-from config import API_KEY, BASE_URL, MAX_ITERATIONS, MODEL, STREAM_OUTPUT, SYSTEM_PROMPT, V4_PARAMS, THINKING_MODE, SKILLS, SKILL_AUTO_DETECT
+from config import API_KEY, BASE_URL, MAX_ITERATIONS, MODEL, STREAM_OUTPUT, SYSTEM_PROMPT, V4_PARAMS, THINKING_MODE, SKILLS, SKILL_AUTO_DETECT, get_model_manager
 from knowledge import get_kb
 from tools import TOOLS, execute_tool
+from tracing import get_tracer
+from guardrails import get_input_guardrail, get_output_guardrail
 
 
 @dataclass
@@ -63,6 +65,7 @@ def agent_loop(
     skill_task: Optional[str] = None,
     enable_tools: bool = True,
     enable_skills: bool = True,
+    task_type: str = "tool",
 ) -> str:
     """Agent 主循环。返回累积的完整响应文本。
 
@@ -72,6 +75,7 @@ def agent_loop(
         skill_task: 用于 Skill 自动检测的原始用户任务。为空时使用 user_task。
         enable_tools: False 时不暴露工具，适合纯聊天。
         enable_skills: False 时不自动注入 Skill，避免寒暄误触发专业模式。
+        task_type: 任务类型，用于混合模型选择 ("tool" / "reasoning" / "chat" / "reflection")
     """
     # 构建完整的用户任务（含历史上下文）
     full_task = user_task
@@ -95,16 +99,29 @@ def agent_loop(
         if cancelled:
             raise AgentCancelled()
 
-    if not API_KEY:
-        callbacks.on_status("=" * 50)
-        callbacks.on_status("[ERROR] DEEPSEEK_API_KEY not set")
-        callbacks.on_status("Please set your API key first:")
-        callbacks.on_status('  set DEEPSEEK_API_KEY=sk-yourkey  (Windows CMD)')
-        callbacks.on_status('  $env:DEEPSEEK_API_KEY="sk-yourkey"  (PowerShell)')
-        callbacks.on_status("=" * 50)
-        return "[ERROR] DEEPSEEK_API_KEY not set"
+    # === 输入 Guardrail ===
+    input_gr = get_input_guardrail().check(user_task)
+    if not input_gr.passed:
+        callbacks.on_status(f"[GUARDRAIL] 输入被拦截: {input_gr.rule} - {input_gr.detail}")
+        return f"[GUARDRAIL BLOCKED] {input_gr.rule}: {input_gr.detail}"
 
-    client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    # === 模型选择（混合策略） ===
+    mm = get_model_manager()
+    actual_model_id = mm.get_model_for_task(task_type)
+    model_cfg = mm.get_model_config(actual_model_id)
+    api_key = __import__("os").environ.get(model_cfg.get("api_key_env", ""), "") or model_cfg.get("api_key_default", "") or API_KEY
+    base_url = model_cfg["base_url"]
+    model_name = model_cfg["model_id"]
+    model_params = dict(model_cfg.get("default_params", V4_PARAMS))
+
+    if not api_key:
+        callbacks.on_status("=" * 50)
+        callbacks.on_status(f"[ERROR] API key not set for model '{actual_model_id}'")
+        callbacks.on_status(f"  环境变量: {model_cfg.get('api_key_env', 'N/A')}")
+        callbacks.on_status("=" * 50)
+        return f"[ERROR] API key not set for model '{actual_model_id}'"
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
 
     # 检测并注入 Skill
     system_prompt = detect_and_inject_skill(skill_task or user_task) if enable_skills else SYSTEM_PROMPT
@@ -119,10 +136,14 @@ def agent_loop(
     collected_output: list[str] = []  # 累积所有用户可见输出
     session_start = datetime.now()
 
+    # === 开始 Trace ===
+    tracer = get_tracer()
+    trace_id = tracer.start_trace(user_task[:200])
+
     callbacks.on_status("=" * 55)
     callbacks.on_status(f"  FOC-Assistant [Started]")
-    callbacks.on_status(f"  Model: {MODEL}  |  Max iterations: {max_iterations}")
-    callbacks.on_status(f"  Tools: {len(TOOLS)}  |  Skills: {len(SKILLS)}")
+    callbacks.on_status(f"  Model: {model_name} ({model_cfg['display_name']})  |  Max iterations: {max_iterations}")
+    callbacks.on_status(f"  Tools: {len(TOOLS)}  |  Skills: {len(SKILLS)}  |  Trace: {trace_id}")
     callbacks.on_status(f"  Time: {session_start.strftime('%Y-%m-%d %H:%M:%S')}")
     callbacks.on_status("=" * 55)
     callbacks.on_status(f"\n[Task]: {full_task[:300]}{'...' if len(full_task) > 300 else ''}\n")
@@ -132,18 +153,26 @@ def agent_loop(
             check_cancelled()
             callbacks.on_status(f"--- Round {iteration} ---")
 
-            # 调用 LLM
+            # 调用 LLM（使用动态模型配置 + Tracing）
             kwargs = dict(
-                model=MODEL,
+                model=model_name,
                 messages=messages,
                 stream=STREAM_OUTPUT,
                 extra_body={"thinking_mode": thinking_mode} if thinking_mode is not None else {},
-                **V4_PARAMS,
+                **model_params,
             )
             if enable_tools:
                 kwargs["tools"] = TOOLS
                 kwargs["tool_choice"] = "auto"
-            response = client.chat.completions.create(**kwargs)
+
+            with tracer.trace_llm_call(
+                model=model_name,
+                messages_count=len(messages),
+                tools_count=len(TOOLS) if enable_tools else 0,
+                thinking_mode=thinking_mode or THINKING_MODE,
+                task_type=task_type,
+            ):
+                response = client.chat.completions.create(**kwargs)
             check_cancelled()
 
             # --- 处理流式响应 ---
@@ -206,6 +235,13 @@ def agent_loop(
                         collected_output.append("\n")
                     elapsed = (datetime.now() - session_start).total_seconds()
                     full = "".join(collected_output)
+
+                    # === 输出 Guardrail ===
+                    output_gr = get_output_guardrail().check(full, user_task)
+                    if not output_gr.passed:
+                        full = f"[GUARDRAIL WARNING] {output_gr.rule}: {output_gr.detail}\n\n{full}"
+
+                    tracer.end_trace(trace_id, output=full[:300], status="ok")
                     callbacks.on_complete(full, elapsed, total_tool_calls)
                     return full
 
@@ -227,6 +263,13 @@ def agent_loop(
                         collected_output.append(msg_content)
                     elapsed = (datetime.now() - session_start).total_seconds()
                     full = "".join(collected_output)
+
+                    # === 输出 Guardrail ===
+                    output_gr = get_output_guardrail().check(full, user_task)
+                    if not output_gr.passed:
+                        full = f"[GUARDRAIL WARNING] {output_gr.rule}: {output_gr.detail}\n\n{full}"
+
+                    tracer.end_trace(trace_id, output=full[:300], status="ok")
                     callbacks.on_complete(full, elapsed, total_tool_calls)
                     return full
 
@@ -251,7 +294,8 @@ def agent_loop(
                 callbacks.on_tool_call(tool_name, tool_args)
                 check_cancelled()
 
-                result = execute_tool(tool_name, tool_args, danger_callback=callbacks.on_danger_confirm)
+                with tracer.trace_tool_call(tool_name, tool_args):
+                    result = execute_tool(tool_name, tool_args, danger_callback=callbacks.on_danger_confirm)
                 total_tool_calls += 1
 
                 # 错误恢复：跟踪连续失败
@@ -294,18 +338,28 @@ def agent_loop(
                     full = "".join(collected_output).strip()
                     if not full:
                         full = str(tool_args.get("summary", "")).strip() or result
+
+                    # === 输出 Guardrail ===
+                    output_gr = get_output_guardrail().check(full, user_task)
+                    if not output_gr.passed:
+                        full = f"[GUARDRAIL WARNING] {output_gr.rule}: {output_gr.detail}\n\n{full}"
+
+                    tracer.end_trace(trace_id, output=full[:300], status="ok")
                     callbacks.on_complete(full, elapsed, total_tool_calls)
                     return full
     except AgentCancelled:
         callbacks.on_status("[CANCELLED] 用户终止了当前任务")
         partial = "".join(collected_output).strip()
+        tracer.end_trace(trace_id, output="cancelled", status="error")
         return "[CANCELLED] 当前任务已终止。" + (f"\n\n已产生的部分输出:\n{partial}" if partial else "")
 
     elapsed = (datetime.now() - session_start).total_seconds()
     callbacks.on_status(f"\n{'='*55}")
     callbacks.on_status(f"  [WARN] Max iterations reached ({max_iterations})  |  {elapsed:.1f}s")
     callbacks.on_status(f"{'='*55}")
-    return "".join(collected_output)
+    full = "".join(collected_output)
+    tracer.end_trace(trace_id, output=full[:300], status="ok")
+    return full
 
 
 def main():

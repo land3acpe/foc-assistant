@@ -689,6 +689,61 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "handoff_to_agent",
+            "description": "声明式 Handoff：将子任务交给最合适的专家 Agent 自动处理。不需要指定 Agent ID，系统会根据任务内容自动匹配。适合不确定该用哪个 Agent 时使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "要委派的子任务描述",
+                    },
+                    "prefer_agent": {
+                        "type": "string",
+                        "description": "可选，优先使用的 Agent ID。不填则自动选择。",
+                        "enum": ["code_analyzer", "waveform_analyzer", "controller_designer", "research_agent", "debug_helper"],
+                    },
+                },
+                "required": ["task"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "switch_model",
+            "description": "切换当前使用的 AI 模型。可以切换到不同的模型（如 MiMo、DeepSeek 等）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "model_id": {
+                        "type": "string",
+                        "description": "模型 ID，如 'deepseek-v4-pro', 'mimo-v2.5', 'mimo-v2.5-pro', 'mimo-api', 'ollama-local', 'gpt-4o'",
+                    },
+                },
+                "required": ["model_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_models",
+            "description": "列出所有可用的 AI 模型及其配置信息。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trace_summary",
+            "description": "查看当前会话的 Tracing 摘要：LLM 调用次数、工具调用次数、耗时等。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -850,6 +905,18 @@ def execute_tool(name: str, args: dict, danger_callback: Optional[Callable[[str]
 
         elif name == "list_agents":
             return _list_agents(args)
+
+        elif name == "handoff_to_agent":
+            return _handoff_to_agent(args)
+
+        elif name == "switch_model":
+            return _switch_model(args)
+
+        elif name == "list_models":
+            return _list_models(args)
+
+        elif name == "trace_summary":
+            return _trace_summary(args)
 
         else:
             return f"未知工具: {name}"
@@ -1911,3 +1978,34 @@ def _list_agents(args: dict) -> str:
     """列出可用的专业 Agent"""
     from agents import list_agents
     return list_agents()
+
+
+def _handoff_to_agent(args: dict) -> str:
+    """声明式 Handoff"""
+    task = args.get("task", "")
+    prefer_agent = args.get("prefer_agent", "")
+    if not task:
+        return "错误: 缺少 task 参数"
+    from agents import handoff_to_agent
+    return handoff_to_agent(task, prefer_agent)
+
+
+def _switch_model(args: dict) -> str:
+    """切换模型"""
+    model_id = args.get("model_id", "")
+    if not model_id:
+        return "错误: 缺少 model_id 参数"
+    from config import get_model_manager
+    return get_model_manager().switch_model(model_id)
+
+
+def _list_models(args: dict) -> str:
+    """列出可用模型"""
+    from config import get_model_manager
+    return get_model_manager().list_models()
+
+
+def _trace_summary(args: dict) -> str:
+    """查看 trace 摘要"""
+    from tracing import get_tracer
+    return get_tracer().get_summary()
