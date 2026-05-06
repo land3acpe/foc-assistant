@@ -200,6 +200,21 @@ def get_model_manager() -> ModelManager:
     return _model_manager
 
 
+def validate_config() -> list[str]:
+    """启动时校验配置完整性，返回警告列表"""
+    warnings = []
+    # 校验 HYBRID_STRATEGY 中的 model_id 是否存在于 MODEL_REGISTRY
+    for key in ("tool_model", "reasoning_model", "chat_model", "reflection_model"):
+        model_id = HYBRID_STRATEGY.get(key)
+        if model_id and model_id not in MODEL_REGISTRY:
+            warnings.append(f"HYBRID_STRATEGY['{key}'] = '{model_id}' 不存在于 MODEL_REGISTRY")
+    # 校验默认活跃模型
+    default_model = os.environ.get("FOC_ACTIVE_MODEL", "deepseek-v4-pro")
+    if default_model not in MODEL_REGISTRY:
+        warnings.append(f"默认模型 '{default_model}' 不存在于 MODEL_REGISTRY")
+    return warnings
+
+
 # ============================================================
 # 向后兼容 —— 保留旧的全局变量，但底层用 ModelManager
 # ============================================================

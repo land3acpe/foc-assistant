@@ -8,7 +8,7 @@ from typing import Callable, Optional
 
 from openai import OpenAI
 
-from config import API_KEY, BASE_URL, MAX_ITERATIONS, MODEL, STREAM_OUTPUT, SYSTEM_PROMPT, V4_PARAMS, THINKING_MODE, SKILLS, SKILL_AUTO_DETECT, get_model_manager
+from config import MAX_ITERATIONS, STREAM_OUTPUT, SYSTEM_PROMPT, V4_PARAMS, THINKING_MODE, SKILLS, SKILL_AUTO_DETECT, get_model_manager
 from knowledge import get_kb
 from tools import TOOLS, execute_tool
 from tracing import get_tracer
@@ -66,6 +66,7 @@ def agent_loop(
     enable_tools: bool = True,
     enable_skills: bool = True,
     task_type: str = "tool",
+    system_prompt_override: Optional[str] = None,
 ) -> str:
     """Agent 主循环。返回累积的完整响应文本。
 
@@ -76,6 +77,8 @@ def agent_loop(
         enable_tools: False 时不暴露工具，适合纯聊天。
         enable_skills: False 时不自动注入 Skill，避免寒暄误触发专业模式。
         task_type: 任务类型，用于混合模型选择 ("tool" / "reasoning" / "chat" / "reflection")
+        system_prompt_override: 如果提供，直接用作 system prompt，跳过 Skill 检测和经验注入。
+                                用于子 Agent 调用，由调用者构建完整的专业 prompt。
     """
     # 构建完整的用户任务（含历史上下文）
     full_task = user_task
@@ -109,7 +112,8 @@ def agent_loop(
     mm = get_model_manager()
     actual_model_id = mm.get_model_for_task(task_type)
     model_cfg = mm.get_model_config(actual_model_id)
-    api_key = __import__("os").environ.get(model_cfg.get("api_key_env", ""), "") or model_cfg.get("api_key_default", "") or API_KEY
+    import os as _os
+    api_key = _os.environ.get(model_cfg.get("api_key_env", ""), "") or model_cfg.get("api_key_default", "")
     base_url = model_cfg["base_url"]
     model_name = model_cfg["model_id"]
     model_params = dict(model_cfg.get("default_params", V4_PARAMS))
@@ -123,8 +127,22 @@ def agent_loop(
 
     client = OpenAI(api_key=api_key, base_url=base_url)
 
-    # 检测并注入 Skill
-    system_prompt = detect_and_inject_skill(skill_task or user_task) if enable_skills else SYSTEM_PROMPT
+    # 构建 system prompt
+    if system_prompt_override:
+        system_prompt = system_prompt_override
+    else:
+        # 检测并注入 Skill
+        system_prompt = detect_and_inject_skill(skill_task or user_task) if enable_skills else SYSTEM_PROMPT
+
+        # 注入经验库 prompt（如果经验库有内容）
+        try:
+            from api.memory_api import get_memory_api
+            _mem_api = get_memory_api()
+            exp_prompt = _mem_api.get_experience_prompt()
+            if exp_prompt:
+                system_prompt += "\n\n" + exp_prompt
+        except Exception:
+            pass  # 经验库初始化失败不影响主流程
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -305,8 +323,8 @@ def agent_loop(
                 else:
                     consecutive_failures = 0
 
-                # 连续失败降级：注入系统提示
-                if consecutive_failures >= 3:
+                # 连续失败降级：注入系统提示（最多触发 2 次，共 6 次失败后强制退出）
+                if consecutive_failures >= 3 and consecutive_failures < 6:
                     messages.append({
                         "role": "system",
                         "content": (
@@ -317,7 +335,16 @@ def agent_loop(
                             "4. 不要无限循环尝试"
                         ),
                     })
-                    consecutive_failures = 0  # 重置，避免重复注入
+                    consecutive_failures = 0  # 重置，允许再试一轮
+
+                # 硬限制：连续失败超过 6 次，强制终止
+                if consecutive_failures >= 6:
+                    callbacks.on_status("[ERROR] 连续工具调用失败过多，强制终止")
+                    elapsed = (datetime.now() - session_start).total_seconds()
+                    full = "".join(collected_output) or "[ERROR] 工具调用持续失败，任务无法完成。"
+                    tracer.end_trace(trace_id, output=full[:300], status="error")
+                    callbacks.on_complete(full, elapsed, total_tool_calls)
+                    return full
 
                 # 截断过长结果（保留摘要信息）
                 if len(result) > 6000:
@@ -364,6 +391,12 @@ def agent_loop(
 
 def main():
     """入口"""
+
+    # 启动配置校验
+    from config import validate_config
+    config_warnings = validate_config()
+    for w in config_warnings:
+        print(f"  [CONFIG WARNING] {w}")
 
     # 启动时自动加载知识库索引
     kb = get_kb()
@@ -427,9 +460,10 @@ def show_help():
     print("  也可在命令行直接传参:")
     print("    python agent.py \"你的任务\"")
     print()
+    mm = get_model_manager()
     print(f"  当前工具: {len(TOOLS)} 个")
     print(f"  当前 Skills: {len(SKILLS)} 个")
-    print(f"  模型: {MODEL}")
+    print(f"  模型: {mm.active_model_id}")
     print()
 
 

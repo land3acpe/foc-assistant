@@ -16,7 +16,7 @@ from typing import Optional
 
 from openai import OpenAI
 
-from config import API_KEY, BASE_URL, MODEL
+from config import get_model_manager
 
 REFLECTION_LOG = Path(__file__).parent / "reflection_log.jsonl"
 
@@ -68,7 +68,16 @@ def reflect_on_execution(
         tool_results: 工具返回结果列表
         intent: 路由意图 (chat/qa/research/execution)
     """
-    if not API_KEY:
+    # 动态获取反思模型配置
+    mm = get_model_manager()
+    model_id = mm.get_model_for_task("reflection")
+    model_cfg = mm.get_model_config(model_id)
+    import os as _os
+    api_key = _os.environ.get(model_cfg.get("api_key_env", ""), "") or model_cfg.get("api_key_default", "")
+    base_url = model_cfg["base_url"]
+    model_name = model_cfg["model_id"]
+
+    if not api_key:
         return ReflectionResult(
             quality=0.5, summary="反思不可用: 缺少 API Key"
         )
@@ -96,9 +105,9 @@ def reflect_on_execution(
     )
 
     try:
-        client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+        client = OpenAI(api_key=api_key, base_url=base_url)
         resp = client.chat.completions.create(
-            model=MODEL,
+            model=model_name,
             messages=[
                 {"role": "system", "content": REFLECTION_PROMPT},
                 {"role": "user", "content": user_prompt},

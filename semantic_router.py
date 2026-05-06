@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from openai import OpenAI
 
-from config import API_KEY, BASE_URL, MODEL
+from config import get_model_manager
 from router import Intent, RouteDecision
 
 
@@ -46,13 +46,22 @@ def semantic_route(text: str) -> RouteDecision:
     The call intentionally exposes no tools and does not inject domain skills.
     If anything fails, fall back to chat-first behavior.
     """
-    if not API_KEY:
+    # 动态获取路由模型配置（使用 chat 模型，轻量快速）
+    import os as _os
+    mm = get_model_manager()
+    model_id = mm.get_model_for_task("chat")
+    model_cfg = mm.get_model_config(model_id)
+    api_key = _os.environ.get(model_cfg.get("api_key_env", ""), "") or model_cfg.get("api_key_default", "")
+    base_url = model_cfg["base_url"]
+    model_name = model_cfg["model_id"]
+
+    if not api_key:
         return RouteDecision(Intent.CHAT, 0.2, "semantic router unavailable: missing API key")
 
-    client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    client = OpenAI(api_key=api_key, base_url=base_url)
     try:
         response = client.chat.completions.create(
-            model=MODEL,
+            model=model_name,
             messages=[
                 {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
                 {"role": "user", "content": text[:1000]},

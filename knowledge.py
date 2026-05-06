@@ -75,9 +75,17 @@ class KnowledgeBase:
     # ================================================================
 
     def build_index(self) -> str:
-        """扫描所有文档源，构建倒排索引"""
-        self.documents = []
-        self.inverted_index = defaultdict(set)
+        """扫描所有文档源，构建倒排索引（支持增量：只索引 mtime 变化的文件）"""
+        # 加载旧索引的 mtime 记录
+        old_mtimes = self._load_old_mtimes()
+
+        # 如果是全量重建（旧索引不存在），清空
+        if not old_mtimes:
+            self.documents = []
+            self.inverted_index = defaultdict(set)
+
+        # 记录本次扫描的文件 mtime
+        current_mtimes: dict[str, float] = {}
 
         stats = {"md": 0, "txt": 0, "pdf": 0, "csv": 0, "pdf_text": 0, "code": 0}
 
@@ -87,13 +95,24 @@ class KnowledgeBase:
                 continue
             for filepath in directory.glob(pattern):
                 try:
+                    filepath_str = str(filepath)
+                    file_mtime = filepath.stat().st_mtime
+                    current_mtimes[filepath_str] = file_mtime
+
+                    # 增量检查：文件未变化则跳过
+                    if not self._should_reindex(filepath_str, old_mtimes):
+                        continue
+
+                    # 移除该文件的旧 chunks（如果有）
+                    self._remove_file_chunks(filepath_str)
+
                     text = filepath.read_text(encoding="utf-8", errors="ignore")
                     chunks = self._chunk_text(text, 500)
                     for i, chunk in enumerate(chunks):
                         doc_id = len(self.documents)
                         self.documents.append({
                             "id": doc_id,
-                            "path": str(filepath),
+                            "path": filepath_str,
                             "name": filepath.name,
                             "tag": tag,
                             "chunk_index": i,
@@ -110,15 +129,24 @@ class KnowledgeBase:
                 continue
             for filepath in directory.glob(pattern):
                 try:
+                    filepath_str = str(filepath)
+                    file_mtime = filepath.stat().st_mtime
+                    current_mtimes[filepath_str] = file_mtime
+
+                    if not self._should_reindex(filepath_str, old_mtimes):
+                        stats["pdf"] += 1
+                        continue
+
+                    self._remove_file_chunks(filepath_str)
+
                     pdf_text = self._extract_pdf_text(filepath)
                     if pdf_text and len(pdf_text) > 50:
-                        # 有正文 → 全文索引
                         chunks = self._chunk_text(pdf_text, 500)
                         for i, chunk in enumerate(chunks):
                             doc_id = len(self.documents)
                             self.documents.append({
                                 "id": doc_id,
-                                "path": str(filepath),
+                                "path": filepath_str,
                                 "name": filepath.name,
                                 "tag": f"{tag}(全文)",
                                 "chunk_index": i,
@@ -127,11 +155,9 @@ class KnowledgeBase:
                             self._index_document(doc_id, chunk)
                         stats["pdf_text"] += 1
                     else:
-                        # 无正文（扫描件）→ 只索引文件名
                         self._index_filename_only(filepath, tag)
                     stats["pdf"] += 1
                 except Exception:
-                    # 失败时至少索引文件名
                     self._index_filename_only(filepath, tag)
                     stats["pdf"] += 1
 
@@ -141,13 +167,22 @@ class KnowledgeBase:
                 continue
             for filepath in directory.rglob(pattern):
                 try:
+                    filepath_str = str(filepath)
+                    file_mtime = filepath.stat().st_mtime
+                    current_mtimes[filepath_str] = file_mtime
+
+                    if not self._should_reindex(filepath_str, old_mtimes):
+                        continue
+
+                    self._remove_file_chunks(filepath_str)
+
                     text = filepath.read_text(encoding="utf-8", errors="ignore")
                     chunks = self._chunk_text(text, 500)
                     for i, chunk in enumerate(chunks):
                         doc_id = len(self.documents)
                         self.documents.append({
                             "id": doc_id,
-                            "path": str(filepath),
+                            "path": filepath_str,
                             "name": filepath.name,
                             "tag": tag,
                             "chunk_index": i,
@@ -164,11 +199,20 @@ class KnowledgeBase:
                 continue
             for filepath in directory.glob(pattern):
                 try:
+                    filepath_str = str(filepath)
+                    file_mtime = filepath.stat().st_mtime
+                    current_mtimes[filepath_str] = file_mtime
+
+                    if not self._should_reindex(filepath_str, old_mtimes):
+                        continue
+
+                    self._remove_file_chunks(filepath_str)
+
                     summary = self._summarize_csv(filepath)
                     doc_id = len(self.documents)
                     self.documents.append({
                         "id": doc_id,
-                        "path": str(filepath),
+                        "path": filepath_str,
                         "name": filepath.name,
                         "tag": tag,
                         "chunk_index": 0,
@@ -300,6 +344,43 @@ class KnowledgeBase:
         for token in tokens:
             if len(token) >= 2:
                 self.inverted_index[token].add(doc_id)
+
+    def _remove_file_chunks(self, filepath: str):
+        """移除指定文件的所有旧 chunks 和倒排索引条目"""
+        ids_to_remove = {doc["id"] for doc in self.documents if doc["path"] == filepath}
+        if not ids_to_remove:
+            return
+
+        # 从 documents 列表中移除
+        self.documents = [doc for doc in self.documents if doc["path"] != filepath]
+
+        # 从倒排索引中移除
+        for token, doc_ids in list(self.inverted_index.items()):
+            doc_ids -= ids_to_remove
+            if not doc_ids:
+                del self.inverted_index[token]
+
+    def _load_old_mtimes(self) -> dict[str, float]:
+        """从旧索引文件中加载文件 mtime 记录"""
+        if not KB_INDEX_PATH.exists():
+            return {}
+        try:
+            data = json.loads(KB_INDEX_PATH.read_text(encoding="utf-8"))
+            return data.get("file_mtimes", {})
+        except Exception:
+            return {}
+
+    def _should_reindex(self, filepath: str, old_mtimes: dict[str, float]) -> bool:
+        """判断文件是否需要重新索引"""
+        if not old_mtimes:
+            return True  # 旧索引无 mtime 记录，需要全量重建
+        if filepath not in old_mtimes:
+            return True  # 新文件
+        try:
+            current_mtime = Path(filepath).stat().st_mtime
+            return abs(old_mtimes[filepath] - current_mtime) >= 0.01
+        except Exception:
+            return True
 
     # ================================================================
     # 搜索
@@ -464,9 +545,22 @@ class KnowledgeBase:
     # ================================================================
 
     def _save_index(self):
+        # 计算当前所有文件的 mtime
+        file_mtimes: dict[str, float] = {}
+        seen_paths = set()
+        for doc in self.documents:
+            path = doc["path"]
+            if path not in seen_paths and path != "(user note)":
+                seen_paths.add(path)
+                try:
+                    file_mtimes[path] = Path(path).stat().st_mtime
+                except Exception:
+                    pass
+
         data = {
             "documents": self.documents,
             "inverted_index": {k: list(v) for k, v in self.inverted_index.items()},
+            "file_mtimes": file_mtimes,
         }
         KB_INDEX_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -478,8 +572,10 @@ class KnowledgeBase:
                 self.inverted_index = defaultdict(set, {k: set(v) for k, v in data["inverted_index"].items()})
                 self.loaded = True
                 return
-            except Exception:
-                pass
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                print(f"  [KB] 索引文件损坏，将重建: {e}")
+            except Exception as e:
+                print(f"  [KB] 索引加载异常，将重建: {e}")
         self.build_index()
 
 
