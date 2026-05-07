@@ -50,6 +50,14 @@ class ChatMemory:
             "content": content,
             "ts": datetime.now().isoformat(timespec="seconds"),
         })
+        if len(self._turns) > self.maxlen:
+            to_compress = []
+            while len(self._turns) > self.summary_keep:
+                to_compress.append(self._turns.popleft())
+            try:
+                self._summary = self._summarize(self._summary, to_compress)
+            except Exception as e:
+                logger.warning(f"summary failed, drop oldest as FIFO: {e}")
         self._save()
 
     def get_context(self) -> list[dict]:
@@ -66,6 +74,25 @@ class ChatMemory:
             "has_summary": bool(self._summary),
             "summary_chars": len(self._summary),
         }
+
+    def _summarize(self, old_summary: str, new_turns: list[dict]) -> str:
+        if not self.llm_client:
+            raise RuntimeError("llm_client is None")
+        formatted = "\n".join(
+            f"[{t['role']}] {t['content']}" for t in new_turns
+        )
+        old_block = old_summary or "（无）"
+        prompt = (
+            "你是对话摘要助手。请把以下信息压缩为不超过 300 字的中文摘要，保留：\n"
+            "- 用户的核心诉求和已确定的参数\n"
+            "- 已尝试的方案和结果\n"
+            "- 待解决的问题\n\n"
+            f"【已有摘要（如有）】\n{old_block}\n\n"
+            f"【新增对话】\n{formatted}\n\n"
+            "输出新的统一摘要（替代已有摘要，不要追加）："
+        )
+        result = self.llm_client([{"role": "user", "content": prompt}])
+        return result.strip() if isinstance(result, str) else str(result)
 
     def _summary_path(self) -> Path:
         safe = re.sub(r"[^\w\-]", "_", self.session_key)

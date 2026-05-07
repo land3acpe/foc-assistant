@@ -59,3 +59,35 @@ def test_session_key_with_special_chars(tmp_storage):
 
     mem2 = ChatMemory("qq:1:2", storage_dir=tmp_storage)
     assert mem2.get_context()[0]["content"] == "x"
+
+
+def test_maxlen_triggers_summary(tmp_storage):
+    mem = ChatMemory(
+        "s1",
+        maxlen=5,
+        summary_keep=2,
+        storage_dir=tmp_storage,
+        llm_client=_stub_llm,
+    )
+    for i in range(7):
+        mem.add_turn("user", f"m{i}")
+    assert mem.stats()["has_summary"] is True
+    assert mem.stats()["turns"] == 3
+    ctx = mem.get_context()
+    assert ctx[0]["role"] == "system"
+    assert ctx[0]["content"] == "STUB_SUMMARY"
+    assert len(ctx) == 4
+
+
+def test_summary_fallback_on_llm_error(tmp_storage):
+    mem = ChatMemory(
+        "s1",
+        maxlen=5,
+        summary_keep=2,
+        storage_dir=tmp_storage,
+        llm_client=_failing_llm,
+    )
+    for i in range(7):
+        mem.add_turn("user", f"m{i}")
+    assert mem.stats()["has_summary"] is False
+    assert mem.stats()["turns"] == 3
