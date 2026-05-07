@@ -1,4 +1,4 @@
-"""Agent/模型工具：reflect, memory_search, memory_stats, scheduler_status,
+"""Agent/模型工具：reflect, scheduler_status,
    spawn_agent, list_agents, handoff_to_agent, switch_model, list_models, trace_summary"""
 
 import json
@@ -21,24 +21,6 @@ def _reflect_tool(args: dict) -> str:
         f"\n\n任务摘要: {task_summary}\n"
         f"提示: 如需深度反思，请使用 graph_agent 的 reflect 节点（自动触发）。"
     )
-
-
-def _memory_search(args: dict) -> str:
-    """搜索对话记忆"""
-    query = args.get("query", "")
-    max_results = int(args.get("max_results", 5))
-    if not query:
-        return "错误: 缺少 query 参数"
-    from memory import get_memory
-    mem = get_memory()
-    return mem.search_memory(query, max_results)
-
-
-def _memory_stats(args: dict) -> str:
-    """查看记忆统计"""
-    from memory import get_memory
-    mem = get_memory()
-    return mem.get_stats()
 
 
 def _scheduler_status(args: dict) -> str:

@@ -603,35 +603,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "memory_search",
-            "description": "搜索对话历史记忆。记忆系统自动从对话中提取技术洞察、调试经验、参数配置等。适合回顾之前讨论过的内容。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "搜索关键词，如 'PI调参'、'编译错误'、'ESO参数'",
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "最大返回条数，默认 5",
-                    },
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_stats",
-            "description": "查看记忆系统统计：记忆条目数、用户关注主题、常用工具、对话次数等。",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "scheduler_status",
             "description": "查看后台调度器状态：定时任务列表、运行次数、下次执行时间、文件监控状态等。",
             "parameters": {"type": "object", "properties": {}, "required": []},
@@ -793,7 +764,7 @@ def _register():
     from tools._knowledge import _knowledge_search, _knowledge_add, _knowledge_list, _knowledge_import, _knowledge_rebuild
     from tools._web import _web_search, _web_fetch, _download_file
     from tools._agent_tools import (
-        _reflect_tool, _memory_search, _memory_stats, _scheduler_status,
+        _reflect_tool, _scheduler_status,
         _spawn_agent, _list_agents, _handoff_to_agent, _switch_model,
         _list_models, _trace_summary,
     )
@@ -827,8 +798,6 @@ def _register():
         "web_fetch": _web_fetch,
         "download_file": _download_file,
         "reflect": _reflect_tool,
-        "memory_search": _memory_search,
-        "memory_stats": _memory_stats,
         "scheduler_status": _scheduler_status,
         "spawn_agent": _spawn_agent,
         "list_agents": _list_agents,
