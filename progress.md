@@ -34,3 +34,37 @@
 - Phase 1（Week 1）：Issues #1–#8，删冗余 + 修 README
 - Phase 2（Week 2）：Issues #9–#13，加真实 PMSM 工具 + 测试 + CI + 架构图
 - Phase 3（Week 3）：Issues #14–#18，Docker + 部署 + Demo + 讲稿
+
+---
+
+## 2026-05-07：Issue #1 完成
+
+**完成事项**：
+- 三层记忆架构落地：ChatMemory（短期）+ KnowledgeBase（RAG）+ ExperienceStore（经验）
+- 新增 `memory.py`（约 140 行）+ `tests/test_memory.py`（10 用例全过）
+- 删除 `conversation_memory.py` / `memory/`（6 文件）/ `api/memory_api.py` / 2 个旧测试
+- 迁移 `agent.py` / `graph_agent.py` / `qq_bot.py` / `tools/_agent_tools.py` / `tools/_registry.py`
+- 净减码 **-2026 行**（验收要求 ≥ -2000）
+
+**计划偏离**：
+- 任务 1 因 `memory/` 目录遮蔽新建的 `memory.py`，提前删除了 `memory/` 和两个测试文件
+- 任务 11 因此并入任务 1，无额外工作
+- 任务 10 新增 qq_bot.py 修复（误 commit 历史修改后回滚重新精确暂存）
+
+**未完成（属 Issue #2）**：
+- ChatMemory 在 LangGraph chat/qa 节点的实际集成
+
+**commit 历史**（9 个）：
+- 62eef49 fix(qq_bot): 移除对已删除的 get_memory 的调用
+- 4492ac6 refactor(tools): 删除 memory_search 与 memory_stats 两个工具
+- 7171c5f refactor(memory): 删除 api/memory_api（facade 层）
+- 9d0e2c9 refactor(agent): experience prompt 直接调用 experience 模块
+- 5524a63 refactor(graph_agent): 移除洞察提取节点
+- 6aacc2e feat(memory): 工厂 get_chat_memory 实例缓存
+- c2fe1ea feat(memory): 实现 clear 与 get_context 格式校验
+- 139582e feat(memory): 触发式 LLM 摘要 + 失败降级 FIFO
+- 29c9ffe feat(memory): JSON 持久化 + session 隔离 + 特殊字符净化
+- e721de2 feat(memory): 实现 ChatMemory 基础 add_turn / get_context
+- 8367260 feat(memory): 任务 1 — 基线 + ChatMemory 骨架
+
+**下一步**：Issue #2（统一双主循环为 LangGraph）
