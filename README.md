@@ -1,5 +1,8 @@
 # FOC-Assistant
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12+-green.svg)](https://www.python.org/downloads/)
+
 > 专为永磁同步电机（PMSM）FOC 矢量控制开发打造的 AI Agent 助手
 
 支持多模型切换（DeepSeek V4 / MiMo-V2.5 / GPT-4o），集成 37 个专业工具、5 个子 Agent、本地知识库、LangGraph 工作流编排、Tracing、Guardrails 和声明式 Handoff。
