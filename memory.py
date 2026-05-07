@@ -94,6 +94,13 @@ class ChatMemory:
         result = self.llm_client([{"role": "user", "content": prompt}])
         return result.strip() if isinstance(result, str) else str(result)
 
+    def clear(self) -> None:
+        self._turns.clear()
+        self._summary = ""
+        path = self._summary_path()
+        if path.exists():
+            path.unlink()
+
     def _summary_path(self) -> Path:
         safe = re.sub(r"[^\w\-]", "_", self.session_key)
         return self.storage_dir / f"{safe}.json"

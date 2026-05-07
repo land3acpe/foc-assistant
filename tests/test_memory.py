@@ -91,3 +91,37 @@ def test_summary_fallback_on_llm_error(tmp_storage):
         mem.add_turn("user", f"m{i}")
     assert mem.stats()["has_summary"] is False
     assert mem.stats()["turns"] == 3
+
+
+def test_get_context_format_no_summary(tmp_storage):
+    mem = ChatMemory("s1", storage_dir=tmp_storage)
+    mem.add_turn("user", "hi")
+    ctx = mem.get_context()
+    assert ctx[0]["role"] == "user"
+    assert all(m["role"] != "system" for m in ctx)
+
+
+def test_get_context_format_with_summary(tmp_storage):
+    mem = ChatMemory(
+        "s1",
+        maxlen=5,
+        summary_keep=2,
+        storage_dir=tmp_storage,
+        llm_client=_stub_llm,
+    )
+    for i in range(7):
+        mem.add_turn("user", f"m{i}")
+    ctx = mem.get_context()
+    assert ctx[0]["role"] == "system"
+    assert ctx[0]["content"] == "STUB_SUMMARY"
+
+
+def test_clear(tmp_storage):
+    mem = ChatMemory("s1", storage_dir=tmp_storage)
+    mem.add_turn("user", "hi")
+    path = tmp_storage / "s1.json"
+    assert path.exists()
+    mem.clear()
+    assert mem.stats()["turns"] == 0
+    assert mem.stats()["has_summary"] is False
+    assert not path.exists()
