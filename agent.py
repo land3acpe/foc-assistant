@@ -8,7 +8,7 @@ from typing import Callable, Optional
 
 from openai import OpenAI
 
-from config import MAX_ITERATIONS, STREAM_OUTPUT, SYSTEM_PROMPT, V4_PARAMS, THINKING_MODE, SKILLS, SKILL_AUTO_DETECT, get_model_manager
+from config import MAX_ITERATIONS, STREAM_OUTPUT, SYSTEM_PROMPT, get_v4_params, get_thinking_mode, SKILLS, SKILL_AUTO_DETECT, get_model_manager
 from knowledge import get_kb
 from tools import TOOLS, execute_tool
 from tracing import get_tracer
@@ -112,11 +112,11 @@ def agent_loop(
     mm = get_model_manager()
     actual_model_id = mm.get_model_for_task(task_type)
     model_cfg = mm.get_model_config(actual_model_id)
-    import os as _os
-    api_key = _os.environ.get(model_cfg.get("api_key_env", ""), "") or model_cfg.get("api_key_default", "")
+    import os
+    api_key = os.environ.get(model_cfg.get("api_key_env", ""), "") or model_cfg.get("api_key_default", "")
     base_url = model_cfg["base_url"]
     model_name = model_cfg["model_id"]
-    model_params = dict(model_cfg.get("default_params", V4_PARAMS))
+    model_params = dict(model_cfg.get("default_params", get_v4_params()))
 
     if not api_key:
         callbacks.on_status("=" * 50)
@@ -136,13 +136,13 @@ def agent_loop(
 
         # 注入经验库 prompt（如果经验库有内容）
         try:
-            from api.memory_api import get_memory_api
-            _mem_api = get_memory_api()
-            exp_prompt = _mem_api.get_experience_prompt()
+            from experience.experience_store import ExperienceStore
+            from experience.experience_tools import get_experience_prompt_section
+            exp_prompt = get_experience_prompt_section(ExperienceStore())
             if exp_prompt:
                 system_prompt += "\n\n" + exp_prompt
-        except Exception:
-            pass  # 经验库初始化失败不影响主流程
+        except Exception as e:
+            print(f"  [WARN] 经验库初始化失败: {e}")
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -187,7 +187,7 @@ def agent_loop(
                 model=model_name,
                 messages_count=len(messages),
                 tools_count=len(TOOLS) if enable_tools else 0,
-                thinking_mode=thinking_mode or THINKING_MODE,
+                thinking_mode=thinking_mode or get_thinking_mode(),
                 task_type=task_type,
             ):
                 response = client.chat.completions.create(**kwargs)
@@ -210,8 +210,8 @@ def agent_loop(
                     if delta.content:
                         try:
                             callbacks.on_token(delta.content)
-                        except Exception:
-                            pass  # 忽略回调中的编码等错误
+                        except Exception as e:
+                            print(f"  [WARN] token 回调异常: {e}")
                         collected["content"] += delta.content
 
                     # 收集工具调用
