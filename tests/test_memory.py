@@ -125,3 +125,13 @@ def test_clear(tmp_storage):
     assert mem.stats()["turns"] == 0
     assert mem.stats()["has_summary"] is False
     assert not path.exists()
+
+
+def test_factory_returns_same_instance(tmp_path, monkeypatch):
+    import memory as memory_mod
+    monkeypatch.setattr(memory_mod, "DEFAULT_STORAGE_DIR", tmp_path / "memory")
+    memory_mod._INSTANCES.clear()
+
+    m1 = get_chat_memory("test_session_factory")
+    m2 = get_chat_memory("test_session_factory")
+    assert m1 is m2

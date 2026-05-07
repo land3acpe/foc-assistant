@@ -137,5 +137,13 @@ class ChatMemory:
             logger.error(f"failed to save {path}: {e}")
 
 
+# ======== 工厂 ========
+_INSTANCES: dict[str, "ChatMemory"] = {}
+
+
 def get_chat_memory(session_key: str = "default") -> ChatMemory:
-    raise NotImplementedError("骨架，由后续任务实现")
+    """工厂方法，按 session_key 缓存默认参数实例。
+    自定义参数请直接 ChatMemory(...)。"""
+    if session_key not in _INSTANCES:
+        _INSTANCES[session_key] = ChatMemory(session_key)
+    return _INSTANCES[session_key]
