@@ -37,7 +37,6 @@ from config import (
 )
 from graph_agent import FOCGraphAgent
 from tools import execute_tool
-from memory import get_memory
 from scheduler import get_scheduler
 from config import MEMORY_ENABLED, SCHEDULER_ENABLED
 
@@ -189,16 +188,8 @@ class FOCQQBot(botpy.Client):
             f"message={result.validation_message[:300]}",
         )
 
-        # 自动记忆提取（如果 graph 的 memorize 节点没有处理）
-        if MEMORY_ENABLED and not result.memory_stored:
-            try:
-                mem = get_memory()
-                insights = mem.extract_insights(task, result.final, [], [], result.intent)
-                stored = mem.auto_store(insights)
-                if stored:
-                    print(f"  [MEMORY] 自动存储 {len(stored)} 条洞察")
-            except Exception as e:
-                print(f"  [MEMORY] 自动记忆失败: {e}")
+        # 洞察提取已废（Issue #1：记忆系统简化为三层架构）
+        # ChatMemory 集成留给 Issue #2
 
         for chunk in self._split_text(result.final):
             await self._reply(message, chunk)
