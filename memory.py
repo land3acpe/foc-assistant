@@ -32,7 +32,38 @@ class ChatMemory:
         storage_dir: Optional[Path] = None,
         llm_client: Optional[Callable[[list[dict]], str]] = None,
     ):
-        raise NotImplementedError("骨架，由后续任务实现")
+        if summary_keep >= maxlen:
+            raise ValueError("summary_keep must be < maxlen")
+        self.session_key = session_key
+        self.maxlen = maxlen
+        self.summary_keep = summary_keep
+        self.storage_dir = storage_dir or DEFAULT_STORAGE_DIR
+        self.llm_client = llm_client
+        self._summary: str = ""
+        self._turns: deque = deque()
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+
+    def add_turn(self, role: str, content: str) -> None:
+        self._turns.append({
+            "role": role,
+            "content": content,
+            "ts": datetime.now().isoformat(timespec="seconds"),
+        })
+
+    def get_context(self) -> list[dict]:
+        msgs: list[dict] = []
+        if self._summary:
+            msgs.append({"role": "system", "content": self._summary})
+        for t in self._turns:
+            msgs.append({"role": t["role"], "content": t["content"]})
+        return msgs
+
+    def stats(self) -> dict:
+        return {
+            "turns": len(self._turns),
+            "has_summary": bool(self._summary),
+            "summary_chars": len(self._summary),
+        }
 
 
 def get_chat_memory(session_key: str = "default") -> ChatMemory:
