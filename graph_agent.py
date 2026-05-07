@@ -9,9 +9,8 @@ from typing import Awaitable, Callable, Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from config import BASE_URL, MAX_ITERATIONS, MODEL, REFLECTION_ENABLED, REFLECTION_MAX_RETRIES, REFLECTION_QUALITY_THRESHOLD, MEMORY_ENABLED
+from config import get_base_url, get_model, MAX_ITERATIONS, REFLECTION_ENABLED, REFLECTION_MAX_RETRIES, REFLECTION_QUALITY_THRESHOLD, MEMORY_ENABLED
 from router import Intent, route_intent
-from semantic_router import semantic_route
 from tools import execute_tool
 from validators import validate_execution_outputs
 
@@ -125,9 +124,6 @@ class FOCGraphAgent:
 
     async def _route_node(self, state: GraphState) -> GraphState:
         decision = route_intent(state["task"])
-        if decision.needs_semantic:
-            semantic = await asyncio.to_thread(semantic_route, state["task"])
-            decision = semantic
         return {
             "intent": decision.intent.value,
             "route_reason": decision.reason,
@@ -163,11 +159,12 @@ class FOCGraphAgent:
         return {"final": "我现在在线。如果上一条任务仍在运行，QQ Bot 会先回复“正在处理上一条任务”；否则我就在等你的下一条任务。"}
 
     async def _meta_node(self, state: GraphState) -> GraphState:
-        provider = "DeepSeek API" if "deepseek" in BASE_URL.lower() else BASE_URL
+        base_url = get_base_url()
+        provider = "DeepSeek API" if "deepseek" in base_url.lower() else base_url
         return {
             "final": (
                 f"我是 FOC-Assistant，一个运行在你本地电脑上的 FOC/PMSM 开发助手。\n"
-                f"当前配置的大模型是 `{MODEL}`，接口来源是 {provider}。\n"
+                f"当前配置的大模型是 `{get_model()}`，接口来源是 {provider}。\n"
                 "我通过 Python + LangGraph + qq-botpy 编排请求，并带有本地知识库、代码搜索、"
                 "CSV 分析、CCS/Simulink/控制器参数计算等工具。"
             )
@@ -345,14 +342,6 @@ class FOCGraphAgent:
         tool_calls = state.get("tool_calls_log", [])
         tool_results = state.get("tool_results_log", [])
 
-        try:
-            from memory import get_memory
-            mem = get_memory()
-            insights = mem.extract_insights(task, final, tool_calls, tool_results, intent)
-            stored = mem.auto_store(insights)
-            if stored:
-                await self._emit(f"已自动记录 {len(stored)} 条洞察到记忆库")
-            return {"memory_stored": stored}
-        except Exception as e:
-            print(f"  [MEMORY] 记忆提取失败: {e}")
-            return {"memory_stored": []}
+        # 洞察提取已废（Issue #1：记忆系统简化为三层架构）
+        # ChatMemory 集成将在 Issue #2 中接入 LangGraph chat/qa 节点
+        return {"memory_stored": []}
