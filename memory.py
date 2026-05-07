@@ -42,6 +42,7 @@ class ChatMemory:
         self._summary: str = ""
         self._turns: deque = deque()
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self._load()
 
     def add_turn(self, role: str, content: str) -> None:
         self._turns.append({
@@ -49,6 +50,7 @@ class ChatMemory:
             "content": content,
             "ts": datetime.now().isoformat(timespec="seconds"),
         })
+        self._save()
 
     def get_context(self) -> list[dict]:
         msgs: list[dict] = []
@@ -64,6 +66,41 @@ class ChatMemory:
             "has_summary": bool(self._summary),
             "summary_chars": len(self._summary),
         }
+
+    def _summary_path(self) -> Path:
+        safe = re.sub(r"[^\w\-]", "_", self.session_key)
+        return self.storage_dir / f"{safe}.json"
+
+    def _load(self) -> None:
+        path = self._summary_path()
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("version") != SCHEMA_VERSION:
+                logger.warning(f"incompatible memory schema, ignoring {path}")
+                return
+            self._summary = data.get("summary", "")
+            for t in data.get("turns", []):
+                self._turns.append(t)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"failed to load {path}: {e}")
+
+    def _save(self) -> None:
+        path = self._summary_path()
+        data = {
+            "session_key": self.session_key,
+            "version": SCHEMA_VERSION,
+            "summary": self._summary,
+            "turns": list(self._turns),
+        }
+        try:
+            path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as e:
+            logger.error(f"failed to save {path}: {e}")
 
 
 def get_chat_memory(session_key: str = "default") -> ChatMemory:
